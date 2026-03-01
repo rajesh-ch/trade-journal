@@ -5,6 +5,7 @@ export interface Trade {
   exitPrice?: number;
   quantity: number;
   pattern: string;
+  sector: string;
   date: string;
   exitDate?: string;
   side: 'long' | 'short';

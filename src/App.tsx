@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, TrendingUp, TrendingDown, BarChart3, List, LayoutDashboard, History, X } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, TrendingDown, BarChart3, List, LayoutDashboard, History, X, Upload, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Papa from 'papaparse';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, Legend 
@@ -10,6 +11,28 @@ import { cn } from './lib/utils';
 import { Trade } from './types';
 
 const COLORS = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+const SECTORS = [
+  "Technology Services",
+  "Electronic Technology",
+  "Finance",
+  "Health Technology",
+  "Health Services",
+  "Consumer Services",
+  "Consumer Durables",
+  "Consumer Non-Durables",
+  "Process Industries",
+  "Distribution Services",
+  "Retail Trade",
+  "Commercial Services",
+  "Transportation",
+  "Utilities",
+  "Energy Minerals",
+  "Non-Energy Minerals",
+  "Communications",
+  "Producer Manufacturing",
+  "Miscellaneous"
+];
 
 export default function App() {
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -82,6 +105,79 @@ export default function App() {
     }
   };
 
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const importedTrades: Trade[] = results.data.map((row: any) => {
+          // Normalize keys to handle different casing
+          const getVal = (keys: string[]) => {
+            const key = keys.find(k => row[k] !== undefined || row[k.toLowerCase()] !== undefined || row[k.toUpperCase()] !== undefined);
+            return key ? row[key] || row[key.toLowerCase()] || row[key.toUpperCase()] : undefined;
+          };
+
+          const symbol = (getVal(['Symbol', 'Ticker']) || '').toUpperCase();
+          const side = (getVal(['Side', 'Type']) || 'long').toLowerCase() as 'long' | 'short';
+          const sector = getVal(['Sector', 'Industry']) || 'Miscellaneous';
+          const entryPrice = parseFloat(getVal(['EntryPrice', 'Price', 'Entry']) || '0');
+          const exitPriceRaw = getVal(['ExitPrice', 'Exit']);
+          const exitPrice = exitPriceRaw ? parseFloat(exitPriceRaw) : undefined;
+          const quantity = parseFloat(getVal(['Quantity', 'Qty', 'Size']) || '0');
+          const pattern = getVal(['Pattern', 'Strategy']) || 'Imported';
+          const date = getVal(['Date', 'EntryDate']) || format(new Date(), 'yyyy-MM-dd');
+          const exitDate = getVal(['ExitDate', 'CloseDate']);
+          const notes = getVal(['Notes', 'Comment']) || '';
+
+          return {
+            id: crypto.randomUUID(),
+            symbol,
+            side,
+            sector,
+            entryPrice,
+            exitPrice,
+            quantity,
+            pattern,
+            date,
+            exitDate,
+            notes
+          };
+        }).filter((t: any) => t.symbol && t.entryPrice > 0 && t.quantity > 0);
+
+        if (importedTrades.length > 0) {
+          setTrades(prev => [...importedTrades, ...prev]);
+          alert(`Successfully imported ${importedTrades.length} trades!`);
+        } else {
+          alert("No valid trades found in CSV. Please ensure your CSV has headers like: Symbol, Side, EntryPrice, Quantity, Pattern, Date");
+        }
+        e.target.value = '';
+      },
+      error: (error) => {
+        console.error("CSV Parsing Error:", error);
+        alert("Failed to parse CSV file.");
+      }
+    });
+  };
+
+  const downloadCSVTemplate = () => {
+    const headers = ['Symbol', 'Side', 'Sector', 'EntryPrice', 'ExitPrice', 'Quantity', 'Pattern', 'Date', 'ExitDate', 'Notes'];
+    const example = ['AAPL', 'long', 'Electronic Technology', '150.50', '155.00', '10', 'Breakout', '2024-03-01', '2024-03-02', 'Strong volume'];
+    const csvContent = [headers.join(','), example.join(',')].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'tradelog_template.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const calculateProfit = (trade: Trade) => {
     if (trade.exitPrice === undefined || trade.exitPrice === null) return 0;
     const diff = trade.side === 'long' 
@@ -142,6 +238,24 @@ export default function App() {
     }));
 
     const winRateByPattern = Object.entries(patternStats).map(([name, data]) => ({
+      name,
+      winRate: Math.round((data.wins / data.total) * 100),
+      profit: data.profit,
+      total: data.total
+    }));
+
+    // Sector Stats
+    const sectorStats: Record<string, { wins: number; total: number; profit: number }> = {};
+    closedTrades.forEach(t => {
+      const profit = calculateProfit(t);
+      const isWin = profit > 0;
+      if (!sectorStats[t.sector]) sectorStats[t.sector] = { wins: 0, total: 0, profit: 0 };
+      sectorStats[t.sector].total++;
+      if (isWin) sectorStats[t.sector].wins++;
+      sectorStats[t.sector].profit += profit;
+    });
+
+    const winRateBySector = Object.entries(sectorStats).map(([name, data]) => ({
       name,
       winRate: Math.round((data.wins / data.total) * 100),
       profit: data.profit,
@@ -212,6 +326,7 @@ export default function App() {
       totalProfit,
       avgProfit: closedTrades.length > 0 ? totalProfit / closedTrades.length : 0,
       winRateByPattern,
+      winRateBySector,
       statsByPeriod,
       equityCurve
     };
@@ -252,12 +367,33 @@ export default function App() {
           </button>
         </nav>
 
-        <button 
-          onClick={() => setIsAddingTrade(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm shadow-indigo-200"
-        >
-          <Plus size={18} /> New Trade
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-2 mr-2">
+            <button 
+              onClick={downloadCSVTemplate}
+              className="text-slate-400 hover:text-indigo-600 transition-colors"
+              title="Download CSV Template"
+            >
+              <Info size={18} />
+            </button>
+          </div>
+          <label className="cursor-pointer bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm">
+            <Upload size={18} /> <span className="hidden sm:inline">Import CSV</span>
+            <input 
+              type="file" 
+              accept=".csv" 
+              className="hidden" 
+              onChange={handleImportCSV}
+            />
+          </label>
+          <button 
+            onClick={() => setIsAddingTrade(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm shadow-indigo-200"
+          >
+            <Plus size={18} /> <span className="hidden sm:inline">New Trade</span>
+            <Plus size={18} className="sm:hidden" />
+          </button>
+        </div>
       </header>
 
       {/* Main Content */}
@@ -265,7 +401,7 @@ export default function App() {
         {activeTab === 'dashboard' ? (
           <div className="space-y-6">
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatsCard 
                 title="Total Profit" 
                 value={`$${stats?.totalProfit.toLocaleString() || '0'}`} 
@@ -298,9 +434,15 @@ export default function App() {
               />
               <StatsCard 
                 title="Best Pattern" 
-                value={stats?.winRateByPattern.sort((a, b) => b.winRate - a.winRate)[0]?.name || 'N/A'} 
+                value={[...(stats?.winRateByPattern || [])].sort((a, b) => b.winRate - a.winRate)[0]?.name || 'N/A'} 
                 trend="neutral"
                 subtitle="Highest win rate"
+              />
+              <StatsCard 
+                title="Best Sector" 
+                value={[...(stats?.winRateBySector || [])].sort((a, b) => b.profit - a.profit)[0]?.name || 'N/A'} 
+                trend="neutral"
+                subtitle="Most profitable"
               />
             </div>
 
@@ -400,6 +542,29 @@ export default function App() {
                   </ResponsiveContainer>
                 </div>
               </div>
+
+              {/* Profit by Sector */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2">
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Profit by Sector</h3>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stats?.winRateBySector || []} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                      <XAxis type="number" stroke="#94a3b8" fontSize={12} tickFormatter={(v) => `$${v}`} />
+                      <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={10} width={120} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        formatter={(v: any) => [`$${v.toLocaleString()}`, 'Profit']}
+                      />
+                      <Bar dataKey="profit" radius={[0, 4, 4, 0]}>
+                        {stats?.winRateBySector.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#10b981' : '#ef4444'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -454,9 +619,9 @@ export default function App() {
                         />
                       </th>
                       <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Entry Date</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Exit Date</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Symbol</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Side</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Symbol</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Side</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Entry</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Exit</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Profit</th>
@@ -496,15 +661,15 @@ export default function App() {
                               />
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-600">
-                            {format(parseISO(trade.date), 'MMM dd, yyyy')}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">
-                            {trade.exitDate ? format(parseISO(trade.exitDate), 'MMM dd, yyyy') : '-'}
-                          </td>
-                          <td className="px-6 py-4 text-sm font-bold text-slate-900">
-                            {trade.symbol}
-                          </td>
-                          <td className="px-6 py-4 text-sm">
+                              {format(parseISO(trade.date), 'MMM dd, yyyy')}
+                            </td>
+                            <td className="px-6 py-4 text-sm font-bold text-slate-900">
+                              {trade.symbol}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-500 italic">
+                              {trade.sector}
+                            </td>
+                            <td className="px-6 py-4 text-sm">
                             <span className={cn(
                               "px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider",
                               trade.side === 'long' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
@@ -651,6 +816,7 @@ function StatsCard({ title, value, trend, subtitle }: { title: string, value: st
 function TradeForm({ onSubmit, onCancel, initialData }: { onSubmit: (trade: Omit<Trade, 'id'>) => void, onCancel: () => void, initialData?: Trade }) {
   const [formData, setFormData] = useState({
     symbol: initialData?.symbol || '',
+    sector: initialData?.sector || 'Miscellaneous',
     entryPrice: initialData?.entryPrice?.toString() || '',
     exitPrice: initialData?.exitPrice?.toString() || '',
     quantity: initialData?.quantity?.toString() || '',
@@ -764,8 +930,25 @@ function TradeForm({ onSubmit, onCancel, initialData }: { onSubmit: (trade: Omit
             <option value="Double Bottom">Double Bottom</option>
             <option value="Head & Shoulders">Head & Shoulders</option>
             <option value="Scalp">Scalp</option>
+            <option value="Imported">Imported</option>
           </select>
         </div>
+        <div className="space-y-1">
+          <label className="text-xs font-bold text-slate-500 uppercase">Sector (Optional)</label>
+          <select 
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+            value={formData.sector}
+            onChange={e => setFormData({ ...formData, sector: e.target.value })}
+          >
+            <option value="Miscellaneous">Select Sector</option>
+            {SECTORS.map(sector => (
+              <option key={sector} value={sector}>{sector}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-xs font-bold text-slate-500 uppercase">Entry Date</label>
           <input 
