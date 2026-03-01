@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from 'recharts';
-import { format, parseISO, startOfDay } from 'date-fns';
+import { format, parseISO, startOfDay, subWeeks, subMonths, subYears, isAfter } from 'date-fns';
 import { cn } from './lib/utils';
 import { Trade } from './types';
 
@@ -148,6 +148,29 @@ export default function App() {
       total: data.total
     }));
 
+    // Time Period Stats
+    const now = new Date();
+    const periods = [
+      { name: '1W', date: subWeeks(now, 1) },
+      { name: '1M', date: subMonths(now, 1) },
+      { name: '3M', date: subMonths(now, 3) },
+      { name: '1Y', date: subYears(now, 1) },
+      { name: 'All', date: new Date(0) },
+    ];
+
+    const statsByPeriod = periods.map(period => {
+      const filteredTrades = closedTrades.filter(t => isAfter(parseISO(t.exitDate || t.date), period.date));
+      const wins = filteredTrades.filter(t => calculateProfit(t) > 0).length;
+      const profit = filteredTrades.reduce((acc, t) => acc + calculateProfit(t), 0);
+      const winRate = filteredTrades.length > 0 ? Math.round((wins / filteredTrades.length) * 100) : 0;
+      return {
+        name: period.name,
+        profit,
+        winRate,
+        total: filteredTrades.length
+      };
+    });
+
     const equityCurve = [...closedTrades]
       .sort((a, b) => parseISO(a.exitDate || a.date).getTime() - parseISO(b.exitDate || b.date).getTime())
       .reduce((acc: any[], t, i) => {
@@ -188,8 +211,8 @@ export default function App() {
       winRate: closedTrades.length > 0 ? Math.round((wins / closedTrades.length) * 100) : 0,
       totalProfit,
       avgProfit: closedTrades.length > 0 ? totalProfit / closedTrades.length : 0,
-      winRateBySymbol,
       winRateByPattern,
+      statsByPeriod,
       equityCurve
     };
   }, [trades]);
@@ -332,12 +355,12 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Profit by Symbol */}
+              {/* Profit by Time Period */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Profit by Symbol</h3>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Profit by Time Period</h3>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats?.winRateBySymbol || []}>
+                    <BarChart data={stats?.statsByPeriod || []}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
                       <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => `$${v}`} />
@@ -346,7 +369,7 @@ export default function App() {
                         formatter={(v: any) => [`$${v.toLocaleString()}`, 'Profit']}
                       />
                       <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
-                        {stats?.winRateBySymbol.map((entry, index) => (
+                        {stats?.statsByPeriod.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#10b981' : '#ef4444'} />
                         ))}
                       </Bar>
@@ -355,31 +378,25 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Win Rate by Symbol */}
+              {/* Win Rate by Time Period */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Win % by Symbol</h3>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-6">Win % by Time Period</h3>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={stats?.winRateBySymbol || []}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="total"
-                        nameKey="name"
-                      >
-                        {stats?.winRateBySymbol.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
+                    <BarChart data={stats?.statsByPeriod || []}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
+                      <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
                       <Tooltip 
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        formatter={(v: any) => [`${v}%`, 'Win Rate']}
                       />
-                      <Legend />
-                    </PieChart>
+                      <Bar dataKey="winRate" radius={[4, 4, 0, 0]}>
+                        {stats?.statsByPeriod.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
