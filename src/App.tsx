@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, TrendingUp, TrendingDown, BarChart3, List, LayoutDashboard, History, X, Upload, Info } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, TrendingDown, BarChart3, List, LayoutDashboard, History, X, Upload, Info, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
 import { 
@@ -172,6 +172,37 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', 'tradelog_template.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportTradesToCSV = () => {
+    if (trades.length === 0) {
+      alert("No trades to export.");
+      return;
+    }
+    const headers = ['Symbol', 'Side', 'Sector', 'EntryPrice', 'ExitPrice', 'Quantity', 'Pattern', 'Date', 'ExitDate', 'Notes'];
+    const rows = trades.map(t => [
+      t.symbol,
+      t.side,
+      t.sector,
+      t.entryPrice,
+      t.exitPrice || '',
+      t.quantity,
+      t.pattern,
+      t.date,
+      t.exitDate || '',
+      `"${(t.notes || '').replace(/"/g, '""')}"`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `tradelog_export_${format(new Date(), 'yyyy-MM-dd')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -386,6 +417,12 @@ export default function App() {
               onChange={handleImportCSV}
             />
           </label>
+          <button 
+            onClick={exportTradesToCSV}
+            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Download size={18} /> <span className="hidden sm:inline">Export CSV</span>
+          </button>
           <button 
             onClick={() => setIsAddingTrade(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm shadow-indigo-200"
